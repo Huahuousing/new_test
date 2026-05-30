@@ -1,0 +1,444 @@
+[game.html](https://github.com/user-attachments/files/28421057/game.html)
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>像素风机甲对战</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background-color: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: white;
+            padding: 20px;
+        }
+        
+        #game-container {
+            position: relative;
+            border: 4px solid #e94560;
+            box-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+        }
+        
+        #gameCanvas {
+            display: block;
+            background-color: #16213e;
+            image-rendering: pixelated;
+        }
+        
+        #ui-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .controls {
+            margin-top: 15px;
+            font-size: 12px;
+            line-height: 2;
+            color: #0f3460;
+        }
+        
+        .player-controls {
+            display: inline-block;
+            margin: 0 30px;
+        }
+        
+        .player1 {
+            color: #4fc3f7;
+        }
+        
+        .player2 {
+            color: #ef5350;
+        }
+        
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #e94560;
+            text-shadow: 2px 2px 0 #0f3460;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚔️ 像素机甲对战 ⚔️</h1>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+    </div>
+    <div id="ui-container">
+        <div class="controls">
+            <div class="player-controls player1">
+                <strong>玩家1 (蓝)</strong><br>
+                A/D: 移动 | W: 跳跃<br>
+                J: 攻击 | K: 防御
+            </div>
+            <div class="player-controls player2">
+                <strong>玩家2 (红)</strong><br>
+                ←/→: 移动 | ↑: 跳跃<br>
+                1: 攻击 | 2: 防御
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GameState = {
+            START: 'start',
+            PLAYING: 'playing',
+            GAME_OVER: 'gameover'
+        };
+        
+        let gameState = GameState.START;
+        let winner = null;
+        
+        const keys = {};
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (gameState === GameState.START && e.key === ' ') {
+                gameState = GameState.PLAYING;
+                resetGame();
+            }
+            if (gameState === GameState.GAME_OVER && e.key === ' ') {
+                gameState = GameState.PLAYING;
+                resetGame();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        class Player {
+            constructor(x, color, isPlayer1) {
+                this.x = x;
+                this.y = 350;
+                this.width = 50;
+                this.height = 70;
+                this.color = color;
+                this.health = 100;
+                this.maxHealth = 100;
+                this.velocityX = 0;
+                this.velocityY = 0;
+                this.isAttacking = false;
+                this.isDefending = false;
+                this.attackCooldown = 0;
+                this.attackDuration = 0;
+                this.facing = isPlayer1 ? 'right' : 'left';
+                this.isPlayer1 = isPlayer1;
+                this.grounded = false;
+                this.animFrame = 0;
+            }
+            
+            update(opponent) {
+                if (this.attackCooldown > 0) this.attackCooldown--;
+                if (this.attackDuration > 0) {
+                    this.attackDuration--;
+                    if (this.attackDuration === 0) {
+                        this.isAttacking = false;
+                    }
+                }
+                
+                const speed = 4;
+                this.velocityX = 0;
+                
+                if (this.isPlayer1) {
+                    if (keys['a']) {
+                        this.velocityX = -speed;
+                        this.facing = 'left';
+                    }
+                    if (keys['d']) {
+                        this.velocityX = speed;
+                        this.facing = 'right';
+                    }
+                    if (keys['w'] && this.grounded) {
+                        this.velocityY = -15;
+                        this.grounded = false;
+                    }
+                    if (keys['j'] && this.attackCooldown === 0 && !this.isDefending) {
+                        this.attack();
+                    }
+                    this.isDefending = keys['k'];
+                } else {
+                    if (keys['arrowleft']) {
+                        this.velocityX = -speed;
+                        this.facing = 'left';
+                    }
+                    if (keys['arrowright']) {
+                        this.velocityX = speed;
+                        this.facing = 'right';
+                    }
+                    if (keys['arrowup'] && this.grounded) {
+                        this.velocityY = -15;
+                        this.grounded = false;
+                    }
+                    if (keys['1'] && this.attackCooldown === 0 && !this.isDefending) {
+                        this.attack();
+                    }
+                    this.isDefending = keys['2'];
+                }
+                
+                this.velocityY += 0.8;
+                
+                this.x += this.velocityX;
+                this.y += this.velocityY;
+                
+                if (this.x < 0) this.x = 0;
+                if (this.x > canvas.width - this.width) this.x = canvas.width - this.width;
+                
+                const groundY = 380;
+                if (this.y >= groundY) {
+                    this.y = groundY;
+                    this.velocityY = 0;
+                    this.grounded = true;
+                }
+                
+                if (this.isAttacking) {
+                    const attackBox = this.getAttackBox();
+                    if (this.checkCollision(attackBox, opponent)) {
+                        if (!opponent.isDefending) {
+                            opponent.takeDamage(15);
+                        } else {
+                            opponent.takeDamage(5);
+                        }
+                        this.isAttacking = false;
+                    }
+                }
+                
+                this.animFrame++;
+            }
+            
+            attack() {
+                this.isAttacking = true;
+                this.attackCooldown = 30;
+                this.attackDuration = 15;
+            }
+            
+            takeDamage(amount) {
+                this.health -= amount;
+                if (this.health < 0) this.health = 0;
+            }
+            
+            getAttackBox() {
+                const attackWidth = 40;
+                if (this.facing === 'right') {
+                    return {
+                        x: this.x + this.width,
+                        y: this.y + 20,
+                        width: attackWidth,
+                        height: 40
+                    };
+                } else {
+                    return {
+                        x: this.x - attackWidth,
+                        y: this.y + 20,
+                        width: attackWidth,
+                        height: 40
+                    };
+                }
+            }
+            
+            checkCollision(box1, box2) {
+                return box1.x < box2.x + box2.width &&
+                       box1.x + box1.width > box2.x &&
+                       box1.y < box2.y + box2.height &&
+                       box1.y + box1.height > box2.y;
+            }
+            
+            draw() {
+                ctx.save();
+                
+                const centerX = this.x + this.width / 2;
+                if (this.facing === 'left') {
+                    ctx.translate(centerX, 0);
+                    ctx.scale(-1, 1);
+                    ctx.translate(-centerX, 0);
+                }
+                
+                if (this.isDefending) {
+                    ctx.globalAlpha = 0.7;
+                    ctx.fillStyle = '#ffd700';
+                    ctx.fillRect(this.x - 5, this.y, this.width + 10, this.height);
+                    ctx.globalAlpha = 1;
+                }
+                
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x + 10, this.y + 20, 30, 35);
+                
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x + 12, this.y, 26, 25);
+                
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(this.x + 18, this.y + 8, 6, 6);
+                ctx.fillRect(this.x + 28, this.y + 8, 6, 6);
+                
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x + 12, this.y + 55, 10, 15);
+                ctx.fillRect(this.x + 28, this.y + 55, 10, 15);
+                
+                if (this.isAttacking) {
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(this.x + 40, this.y + 25, 25, 10);
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillRect(this.x + 55, this.y + 20, 15, 20);
+                } else {
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(this.x + 40, this.y + 25, 10, 20);
+                    ctx.fillRect(this.x, this.y + 25, 10, 20);
+                }
+                
+                ctx.restore();
+            }
+        }
+        
+        let player1, player2;
+        
+        function resetGame() {
+            player1 = new Player(100, '#4fc3f7', true);
+            player2 = new Player(650, '#ef5350', false);
+            winner = null;
+        }
+        
+        function drawBackground() {
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#1a1a2e');
+            gradient.addColorStop(1, '#16213e');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#fff';
+            for (let i = 0; i < 50; i++) {
+                const x = (i * 123) % canvas.width;
+                const y = (i * 47) % 200;
+                const size = (i % 3) + 1;
+                ctx.fillRect(x, y, size, size);
+            }
+            
+            ctx.fillStyle = '#0f3460';
+            ctx.fillRect(0, 400, canvas.width, 100);
+            
+            ctx.fillStyle = '#16213e';
+            for (let i = 0; i < canvas.width; i += 20) {
+                ctx.fillRect(i, 400, 10, 5);
+            }
+        }
+        
+        function drawHealthBar(x, y, health, maxHealth, color) {
+            const barWidth = 200;
+            const barHeight = 20;
+            
+            ctx.fillStyle = '#333';
+            ctx.fillRect(x, y, barWidth, barHeight);
+            
+            const healthWidth = (health / maxHealth) * barWidth;
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, healthWidth, barHeight);
+            
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, barWidth, barHeight);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${health}/${maxHealth}`, x + barWidth / 2, y + 15);
+        }
+        
+        function drawUI() {
+            drawHealthBar(50, 30, player1.health, player1.maxHealth, '#4fc3f7');
+            drawHealthBar(canvas.width - 250, 30, player2.health, player2.maxHealth, '#ef5350');
+        }
+        
+        function drawStartScreen() {
+            drawBackground();
+            
+            ctx.fillStyle = '#e94560';
+            ctx.font = 'bold 28px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('像素机甲对战', canvas.width / 2, 150);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 18px monospace';
+            ctx.fillText('按 空格键 开始游戏', canvas.width / 2, 220);
+            
+            ctx.fillStyle = '#4fc3f7';
+            ctx.font = '14px monospace';
+            ctx.fillText('玩家1: A/D 移动, W 跳跃, J 攻击, K 防御', canvas.width / 2, 290);
+            
+            ctx.fillStyle = '#ef5350';
+            ctx.fillText('玩家2: ←/→ 移动, ↑ 跳跃, 1 攻击, 2 防御', canvas.width / 2, 330);
+        }
+        
+        function drawGameOverScreen() {
+            drawBackground();
+            player1.draw();
+            player2.draw();
+            drawUI();
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#e94560';
+            ctx.font = 'bold 28px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束!', canvas.width / 2, 200);
+            
+            ctx.fillStyle = winner === 1 ? '#4fc3f7' : '#ef5350';
+            ctx.font = 'bold 22px monospace';
+            ctx.fillText(`玩家${winner} 获胜!`, canvas.width / 2, 260);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 18px monospace';
+            ctx.fillText('按 空格键 重新开始', canvas.width / 2, 320);
+        }
+        
+        function checkGameOver() {
+            if (player1.health <= 0) {
+                winner = 2;
+                gameState = GameState.GAME_OVER;
+            } else if (player2.health <= 0) {
+                winner = 1;
+                gameState = GameState.GAME_OVER;
+            }
+        }
+        
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (gameState === GameState.START) {
+                drawStartScreen();
+            } else if (gameState === GameState.PLAYING) {
+                drawBackground();
+                
+                player1.update(player2);
+                player2.update(player1);
+                
+                player1.draw();
+                player2.draw();
+                
+                drawUI();
+                
+                checkGameOver();
+            } else if (gameState === GameState.GAME_OVER) {
+                drawGameOverScreen();
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        resetGame();
+        gameLoop();
+    </script>
+</body>
+</html>
